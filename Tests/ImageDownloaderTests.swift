@@ -1,7 +1,7 @@
 //
 //  ImageDownloaderTests.swift
 //
-//  Copyright (c) 2015-2017 Alamofire Software Foundation (http://alamofire.org/)
+//  Copyright (c) 2015 Alamofire Software Foundation (http://alamofire.org/)
 //
 //  Permission is hereby granted, free of charge, to any person obtaining a copy
 //  of this software and associated documentation files (the "Software"), to deal
@@ -33,7 +33,7 @@ private class ThreadCheckFilter: ImageFilter {
     init() {}
 
     var filter: (Image) -> Image {
-        return { image in
+        { image in
             self.calledOnMainQueue = Thread.isMainThread
             return image
         }
@@ -48,9 +48,9 @@ private class TestCircleFilter: ImageFilter {
     var filterOperationCompleted = false
 
     var filter: (Image) -> Image {
-        return { image in
+        { image in
             self.filterOperationCompleted = true
-            return image.af_imageRoundedIntoCircle()
+            return image.af.imageRoundedIntoCircle()
         }
     }
 }
@@ -60,7 +60,6 @@ private class TestCircleFilter: ImageFilter {
 // MARK: -
 
 class ImageDownloaderTestCase: BaseTestCase {
-
     // MARK: - Setup and Teardown
 
     override func setUp() {
@@ -91,7 +90,7 @@ class ImageDownloaderTestCase: BaseTestCase {
 
     func testThatImageDownloaderCanBeInitializedWithManagerInstanceAndDeinitialized() {
         // Given
-        var downloader: ImageDownloader? = ImageDownloader(sessionManager: SessionManager())
+        var downloader: ImageDownloader? = ImageDownloader(session: Session(startRequestsImmediately: false))
 
         // When
         downloader = nil
@@ -106,7 +105,7 @@ class ImageDownloaderTestCase: BaseTestCase {
         var downloader: ImageDownloader? = ImageDownloader()
 
         // When
-        let _ = downloader?.download(urlRequest) { _ in
+        _ = downloader?.download(urlRequest) { _ in
             // No-op
         }
 
@@ -124,7 +123,7 @@ class ImageDownloaderTestCase: BaseTestCase {
         let urlRequest = try! URLRequest(url: "https://httpbin.org/image/jpeg", method: .get)
         let expectation = self.expectation(description: "image download should succeed")
 
-        var response: DataResponse<Image>?
+        var response: AFIDataResponse<Image>?
 
         // When
         downloader.download(urlRequest) { closureResponse in
@@ -151,8 +150,8 @@ class ImageDownloaderTestCase: BaseTestCase {
         let expectation1 = expectation(description: "download 1 should succeed")
         let expectation2 = expectation(description: "download 2 should succeed")
 
-        var result1: Result<Image>?
-        var result2: Result<Image>?
+        var result1: Result<Image, AFIError>?
+        var result2: Result<Image, AFIError>?
 
         // When
         downloader.download(urlRequest1) { closureResponse in
@@ -187,16 +186,16 @@ class ImageDownloaderTestCase: BaseTestCase {
         let urlRequest2 = try! URLRequest(url: "https://httpbin.org/image/png", method: .get)
 
         let expectation = self.expectation(description: "both downloads should succeed")
-        var completedDownloads = 0
+        expectation.expectedFulfillmentCount = 2
 
-        var results: [Result<Image>] = []
+        var completedDownloads = 0
+        var results: [AFIResult<Image>] = []
 
         // When
         downloader.download([urlRequest1, urlRequest2], filter: nil) { closureResponse in
             results.append(closureResponse.result)
-
             completedDownloads += 1
-            if completedDownloads == 2 { expectation.fulfill() }
+            expectation.fulfill()
         }
 
         let activeRequestCount = downloader.activeRequestCount
@@ -240,7 +239,7 @@ class ImageDownloaderTestCase: BaseTestCase {
         let urlRequest = try! URLRequest(url: "https://httpbin.org/get", method: .get)
         let expectation = self.expectation(description: "download request should fail")
 
-        var response: DataResponse<Image>?
+        var response: AFIDataResponse<Image>?
 
         // When
         downloader.download(urlRequest) { closureResponse in
@@ -254,6 +253,28 @@ class ImageDownloaderTestCase: BaseTestCase {
         XCTAssertNotNil(response?.request, "request should not be nil")
         XCTAssertNotNil(response?.response, "response should not be nil")
         XCTAssertTrue(response?.result.isFailure ?? false, "result should be a failure case")
+    }
+
+    func testThatItCallsTheCompletionHandlerEvenWhenURLRequestConvertibleThrows() {
+        // Given
+        let downloader = ImageDownloader()
+        let urlRequest = ThrowingURLRequestConvertible()
+        let expectation = self.expectation(description: "download request should fail")
+
+        var response: AFIDataResponse<Image>?
+
+        // When
+        downloader.download(urlRequest) { closureResponse in
+            response = closureResponse
+            expectation.fulfill()
+        }
+
+        waitForExpectations(timeout: timeout, handler: nil)
+
+        // Then
+        XCTAssertNil(response?.request, "request should not be nil")
+        XCTAssertNil(response?.response, "response should not be nil")
+        XCTAssertTrue(response?.result.error?.isAlamofireError ?? false, "result should be a failure case")
     }
 
     func testThatItCanDownloadImagesWithDisabledURLCacheInSessionConfiguration() {
@@ -273,7 +294,7 @@ class ImageDownloaderTestCase: BaseTestCase {
         let urlRequest = try! URLRequest(url: "https://httpbin.org/image/jpeg", method: .get)
         let expectation = self.expectation(description: "image download should succeed")
 
-        var response: DataResponse<Image>?
+        var response: AFIDataResponse<Image>?
 
         // When
         downloader.download(urlRequest) { closureResponse in
@@ -289,7 +310,7 @@ class ImageDownloaderTestCase: BaseTestCase {
         XCTAssertTrue(response?.result.isSuccess ?? false, "result should be a success case")
     }
 
-#if os(iOS) || os(tvOS)
+    #if os(iOS) || os(tvOS)
 
     // MARK: - Image Download Tests (iOS and tvOS Only)
 
@@ -302,7 +323,7 @@ class ImageDownloaderTestCase: BaseTestCase {
 
         let expectation = self.expectation(description: "image download should succeed")
 
-        var response: DataResponse<Image>?
+        var response: AFIDataResponse<Image>?
 
         // When
         downloader.download(urlRequest, filter: filter) { closureResponse in
@@ -335,8 +356,8 @@ class ImageDownloaderTestCase: BaseTestCase {
         let expectation1 = expectation(description: "download request 1 should succeed")
         let expectation2 = expectation(description: "download request 2 should succeed")
 
-        var result1: Result<Image>?
-        var result2: Result<Image>?
+        var result1: AFIResult<Image>?
+        var result2: AFIResult<Image>?
 
         // When
         let requestReceipt1 = downloader.download(urlRequest1, filter: filter1) { closureResponse in
@@ -382,8 +403,8 @@ class ImageDownloaderTestCase: BaseTestCase {
         let expectation1 = expectation(description: "download request 1 should succeed")
         let expectation2 = expectation(description: "download request 2 should succeed")
 
-        var result1: Result<Image>?
-        var result2: Result<Image>?
+        var result1: AFIResult<Image>?
+        var result2: AFIResult<Image>?
 
         // When
         let requestReceipt1 = downloader.download(urlRequest1, filter: filter1) { closureResponse in
@@ -411,7 +432,7 @@ class ImageDownloaderTestCase: BaseTestCase {
         XCTAssertFalse(filter2.filterOperationCompleted, "the filter 2 filter operation completed flag should be false")
     }
 
-#endif
+    #endif
 
     // MARK: - Progress Closure Tests
 
@@ -427,19 +448,17 @@ class ImageDownloaderTestCase: BaseTestCase {
         var calledOnMainQueue = false
 
         // When
-        downloader.download(
-            urlRequest,
-            progress: { _ in
-                if progressCalled == false {
-                    progressCalled = true
-                    calledOnMainQueue = Thread.isMainThread
-                    progressExpectation.fulfill()
-                }
-            },
-            completion: { _ in
-                completedExpectation.fulfill()
-            }
-        )
+        downloader.download(urlRequest,
+                            progress: { _ in
+                                if progressCalled == false {
+                                    progressCalled = true
+                                    calledOnMainQueue = Thread.isMainThread
+                                    progressExpectation.fulfill()
+                                }
+                            },
+                            completion: { _ in
+                                completedExpectation.fulfill()
+            })
 
         waitForExpectations(timeout: timeout, handler: nil)
 
@@ -459,21 +478,19 @@ class ImageDownloaderTestCase: BaseTestCase {
         var calledOnExpectedQueue = false
 
         // When
-        downloader.download(
-            urlRequest,
-            progress: { _ in
-                if progressCalled == false {
-                    progressCalled = true
-                    calledOnExpectedQueue = !Thread.isMainThread
+        downloader.download(urlRequest,
+                            progress: { _ in
+                                if progressCalled == false {
+                                    progressCalled = true
+                                    calledOnExpectedQueue = !Thread.isMainThread
 
-                    progressExpectation.fulfill()
-                }
-            },
-            progressQueue: DispatchQueue.global(qos: .utility),
-            completion: { _ in
-                completedExpectation.fulfill()
-            }
-        )
+                                    progressExpectation.fulfill()
+                                }
+                            },
+                            progressQueue: DispatchQueue.global(qos: .utility),
+                            completion: { _ in
+                                completedExpectation.fulfill()
+            })
 
         waitForExpectations(timeout: timeout, handler: nil)
 
@@ -488,9 +505,9 @@ class ImageDownloaderTestCase: BaseTestCase {
         let downloader = ImageDownloader()
         let urlRequest = try! URLRequest(url: "https://httpbin.org/image/jpeg", method: .get)
 
-        let expectation = self.expectation(description: "download request should succeed")
+        let expectation = self.expectation(description: "download request should cancel")
 
-        var response: DataResponse<Image>?
+        var response: AFIDataResponse<Image>?
 
         // When
         let requestReceipt = downloader.download(urlRequest) { closureResponse in
@@ -504,12 +521,11 @@ class ImageDownloaderTestCase: BaseTestCase {
 
         // Then
         XCTAssertNotNil(response, "response should not be nil")
-        XCTAssertNotNil(response?.request, "request should not be nil")
         XCTAssertNil(response?.response, "response should be nil")
         XCTAssertNil(response?.data, "data should be nil")
         XCTAssertTrue(response?.result.isFailure ?? false, "result should be a failure case")
 
-        if let error = response?.result.error as? AFIError {
+        if let error = response?.result.error {
             XCTAssertTrue(error.isRequestCancelledError)
         } else {
             XCTFail("error should not be nil")
@@ -526,8 +542,8 @@ class ImageDownloaderTestCase: BaseTestCase {
         let expectation1 = expectation(description: "download request 1 should succeed")
         let expectation2 = expectation(description: "download request 2 should succeed")
 
-        var response1: DataResponse<Image>?
-        var response2: DataResponse<Image>?
+        var response1: AFIDataResponse<Image>?
+        var response2: AFIDataResponse<Image>?
 
         // When
         let requestReceipt1 = downloader.download(urlRequest1) { closureResponse in
@@ -553,7 +569,7 @@ class ImageDownloaderTestCase: BaseTestCase {
         XCTAssertNil(response1?.data, "response 1 data should be nil")
         XCTAssertTrue(response1?.result.isFailure ?? false, "response 1 result should be a failure case")
 
-        if let error = response1?.result.error as? AFIError {
+        if let error = response1?.result.error {
             XCTAssertTrue(error.isRequestCancelledError)
         } else {
             XCTFail("error should not be nil")
@@ -570,16 +586,14 @@ class ImageDownloaderTestCase: BaseTestCase {
         // Given
         let downloader = ImageDownloader()
 
-        let imageRequests: [URLRequest] = [
-            "https://secure.gravatar.com/avatar/5a105e8b9d40e1329780d62ea2265d8a?d=identicon",
-            "https://secure.gravatar.com/avatar/6a105e8b9d40e1329780d62ea2265d8a?d=identicon",
-            "https://secure.gravatar.com/avatar/7a105e8b9d40e1329780d62ea2265d8a?d=identicon",
-            "https://secure.gravatar.com/avatar/8a105e8b9d40e1329780d62ea2265d8a?d=identicon",
-            "https://secure.gravatar.com/avatar/9a105e8b9d40e1329780d62ea2265d8a?d=identicon"
-        ].map { URLRequest(url: URL(string: $0)!) }
+        let imageRequests: [URLRequest] = ["https://secure.gravatar.com/avatar/5a105e8b9d40e1329780d62ea2265d8a?d=identicon",
+                                           "https://secure.gravatar.com/avatar/6a105e8b9d40e1329780d62ea2265d8a?d=identicon",
+                                           "https://secure.gravatar.com/avatar/7a105e8b9d40e1329780d62ea2265d8a?d=identicon",
+                                           "https://secure.gravatar.com/avatar/8a105e8b9d40e1329780d62ea2265d8a?d=identicon",
+                                           "https://secure.gravatar.com/avatar/9a105e8b9d40e1329780d62ea2265d8a?d=identicon"].map { URLRequest(url: URL(string: $0)!) }
 
-        var initialResults: [Result<Image>] = []
-        var finalResults: [Result<Image>] = []
+        var initialResults: [AFIResult<Image>] = []
+        var finalResults: [AFIResult<Image>] = []
 
         // When
         for (index, imageRequest) in imageRequests.enumerated() {
@@ -625,8 +639,8 @@ class ImageDownloaderTestCase: BaseTestCase {
         for result in initialResults {
             XCTAssertTrue(result.isFailure)
 
-            if case let .failure(error) = result, let afiError = error as? AFIError {
-                XCTAssertTrue(afiError.isRequestCancelledError)
+            if case let .failure(error) = result {
+                XCTAssertTrue(error.isRequestCancelledError)
             } else {
                 XCTFail("error should not be nil")
             }
@@ -649,7 +663,7 @@ class ImageDownloaderTestCase: BaseTestCase {
             // No-op
         }
 
-        let credential = requestReceipt?.request.delegate.credential
+        let credential = requestReceipt?.request.credential
         requestReceipt?.request.cancel()
 
         // Then
@@ -668,7 +682,7 @@ class ImageDownloaderTestCase: BaseTestCase {
             // No-op
         }
 
-        let credential = requestReceipt?.request.delegate.credential
+        let credential = requestReceipt?.request.credential
         requestReceipt?.request.cancel()
 
         // Then
@@ -688,7 +702,7 @@ class ImageDownloaderTestCase: BaseTestCase {
             // No-op
         }
 
-        let requestCredential = requestReceipt?.request.delegate.credential
+        let requestCredential = requestReceipt?.request.credential
         requestReceipt?.request.cancel()
 
         // Then
@@ -697,10 +711,52 @@ class ImageDownloaderTestCase: BaseTestCase {
 
     // MARK: - Threading Tests
 
-    func testThatItAlwaysCallsTheCompletionHandlerOnTheMainQueue() {
+    func testThatItCallsTheCompletionHandlerOnTheMainQueue() {
         // Given
         let downloader = ImageDownloader()
         let urlRequest = try! URLRequest(url: "https://httpbin.org/image/jpeg", method: .get)
+
+        let expectation = self.expectation(description: "download request should succeed")
+
+        var calledOnMainQueue = false
+
+        // When
+        downloader.download(urlRequest) { _ in
+            calledOnMainQueue = Thread.isMainThread
+            expectation.fulfill()
+        }
+
+        waitForExpectations(timeout: timeout, handler: nil)
+
+        // Then
+        XCTAssertTrue(calledOnMainQueue, "completion handler should be called on main queue")
+    }
+
+    func testThatItCallsTheCompletionHandlerOnTheMainQueueIfRequestFailed() {
+        // Given
+        let downloader = ImageDownloader()
+        let urlRequest = try! URLRequest(url: "does-not-exist", method: .get)
+
+        let expectation = self.expectation(description: "download request should succeed")
+
+        var calledOnMainQueue = false
+
+        // When
+        downloader.download(urlRequest) { _ in
+            calledOnMainQueue = Thread.isMainThread
+            expectation.fulfill()
+        }
+
+        waitForExpectations(timeout: timeout, handler: nil)
+
+        // Then
+        XCTAssertTrue(calledOnMainQueue, "completion handler should be called on main queue")
+    }
+
+    func testThatItCallsTheCompletionHandlerOnTheMainQueueIfURLRequestConvertibleThrows() {
+        // Given
+        let downloader = ImageDownloader()
+        let urlRequest = ThrowingURLRequestConvertible()
 
         let expectation = self.expectation(description: "download request should succeed")
 
@@ -805,7 +861,7 @@ class ImageDownloaderTestCase: BaseTestCase {
         let urlRequest = try! URLRequest(url: "https://httpbin.org/image/jpeg", method: .get)
         let expectation = self.expectation(description: "image download should succeed")
 
-        var response: DataResponse<Image>?
+        var response: AFIDataResponse<Image>?
 
         // When
         downloader.download(urlRequest) { closureResponse in
@@ -828,8 +884,8 @@ class ImageDownloaderTestCase: BaseTestCase {
 
         let expectation1 = expectation(description: "image download should succeed")
 
-        var result1: Result<Image>?
-        var result2: Result<Image>?
+        var result1: AFIResult<Image>?
+        var result2: AFIResult<Image>?
 
         // When
         let requestReceipt1 = downloader.download(urlRequest) { closureResponse in
@@ -863,19 +919,19 @@ class ImageDownloaderTestCase: BaseTestCase {
         }
     }
 
-#if os(iOS) || os(tvOS)
+    #if os(iOS) || os(tvOS)
 
     func testThatFilteredImageIsStoredInCacheIfCacheIsAvailable() {
         // Given
         let downloader = ImageDownloader()
         let urlRequest = try! URLRequest(url: "https://httpbin.org/image/jpeg", method: .get)
-        let size  = CGSize(width: 20, height: 20)
+        let size = CGSize(width: 20, height: 20)
         let filter = ScaledToSizeFilter(size: size)
 
         let expectation1 = expectation(description: "image download should succeed")
 
-        var result1: Result<Image>?
-        var result2: Result<Image>?
+        var result1: AFIResult<Image>?
+        var result2: AFIResult<Image>?
 
         // When
         let requestReceipt1 = downloader.download(urlRequest, filter: filter) { closureResponse in
@@ -913,7 +969,7 @@ class ImageDownloaderTestCase: BaseTestCase {
         }
     }
 
-#endif
+    #endif
 
     // MARK: - Internal Logic Tests
 
@@ -921,7 +977,7 @@ class ImageDownloaderTestCase: BaseTestCase {
         // Given
         let downloader = ImageDownloader()
         let urlRequest = try! URLRequest(url: "https://httpbin.org/image/jpeg", method: .get)
-        let request = downloader.sessionManager.request(urlRequest)
+        let request = downloader.session.request(urlRequest)
 
         // When
         let activeRequestCountBefore = downloader.activeRequestCount
@@ -942,8 +998,8 @@ class ImageDownloaderTestCase: BaseTestCase {
         let urlRequest1 = try! URLRequest(url: "https://httpbin.org/image/jpeg", method: .get)
         let urlRequest2 = try! URLRequest(url: "https://httpbin.org/image/png", method: .get)
 
-        let request1 = downloader.sessionManager.request(urlRequest1)
-        let request2 = downloader.sessionManager.request(urlRequest2)
+        let request1 = downloader.session.request(urlRequest1)
+        let request2 = downloader.session.request(urlRequest2)
 
         // When
         downloader.enqueue(request1)
@@ -964,8 +1020,8 @@ class ImageDownloaderTestCase: BaseTestCase {
         let urlRequest1 = try! URLRequest(url: "https://httpbin.org/image/jpeg", method: .get)
         let urlRequest2 = try! URLRequest(url: "https://httpbin.org/image/png", method: .get)
 
-        let request1 = downloader.sessionManager.request(urlRequest1)
-        let request2 = downloader.sessionManager.request(urlRequest2)
+        let request1 = downloader.session.request(urlRequest1)
+        let request2 = downloader.session.request(urlRequest2)
 
         // When
         downloader.enqueue(request1)
@@ -986,8 +1042,8 @@ class ImageDownloaderTestCase: BaseTestCase {
         let urlRequest1 = try! URLRequest(url: "https://httpbin.org/image/jpeg", method: .get)
         let urlRequest2 = try! URLRequest(url: "https://httpbin.org/image/png", method: .get)
 
-        let request1 = downloader.sessionManager.request(urlRequest1)
-        let request2 = downloader.sessionManager.request(urlRequest2)
+        let request1 = downloader.session.request(urlRequest1)
+        let request2 = downloader.session.request(urlRequest2)
 
         // When
         downloader.enqueue(request1)
